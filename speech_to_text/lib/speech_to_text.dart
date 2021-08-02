@@ -240,6 +240,14 @@ class SpeechToText {
     return _initWorked;
   }
 
+  Future<bool> isSpeechAvailable() async {
+    if (!_initWorked) {
+      return Future.value(false);
+    }
+    _shutdownListener();
+    return await SpeechToTextPlatform.instance.isSpeechAvailable();
+  }
+
   /// Stops the current listen for speech if active, does nothing if not.
   ///
   /// Stopping a listen session will cause a final result to be sent. Each

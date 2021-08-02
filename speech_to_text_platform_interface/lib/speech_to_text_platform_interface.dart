@@ -68,6 +68,10 @@ abstract class SpeechToTextPlatform extends PlatformInterface {
     throw UnimplementedError('hasPermission() has not been implemented.');
   }
 
+  Future<bool> isSpeechAvailable() {
+    throw UnimplementedError('isSpeechAvailable() has not been implemented.');
+  }
+
   /// Initialize speech recognition services, returns true if
   /// successful, false if failed.
   ///

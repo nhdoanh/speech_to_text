@@ -204,6 +204,7 @@ public class SpeechToTextPlugin :
                 "stop" -> stopListening(result)
                 "cancel" -> cancelListening(result)
                 "locales" -> locales(result)
+                "isSpeechAvailable" -> isSpeechAvailable(result)
                 else -> result.notImplemented()
             }
         } catch (exc: Exception) {
@@ -241,6 +242,14 @@ public class SpeechToTextPlugin :
         }
         activeResult = result
         initializeIfPermitted(pluginContext)
+    }
+
+    private  fun isSpeechAvailable(result: Result) {
+        if (sdkVersionTooLow()) {
+            result.success(false)
+            return
+        }
+        result.success(SpeechRecognizer.isRecognitionAvailable(pluginContext));
     }
 
     private fun sdkVersionTooLow(): Boolean {
