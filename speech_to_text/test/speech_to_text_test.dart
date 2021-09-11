@@ -388,14 +388,14 @@ void main() {
       expect(listener.speechErrors, 1);
       expect(listener.errors.first.permanent, isTrue);
     });
-    test('continues listening on transient', () async {
+    test('listening unaffected by transient', () async {
       await speech.initialize(onError: listener.onSpeechError);
       await speech.listen();
       testPlatform.onStatus!(SpeechToText.listeningStatus);
       testPlatform.onError!(TestSpeechChannelHandler.transientErrorJson);
       expect(speech.isListening, isTrue);
     });
-    test('continues listening on permanent if cancel not explicitly requested',
+    test('listening unaffected by permanent if cancel not explicitly requested',
         () async {
       await speech.initialize(onError: listener.onSpeechError);
       await speech.listen();

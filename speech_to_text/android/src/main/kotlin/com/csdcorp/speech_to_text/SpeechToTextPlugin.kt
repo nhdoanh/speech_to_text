@@ -60,6 +60,7 @@ enum class SpeechToTextStatus {
     unavailable,
     available,
     done,
+    doneNoResult,
 }
 
 enum class ListenMode {
@@ -94,6 +95,7 @@ public class SpeechToTextPlugin :
     private var debugLogging: Boolean = false
     private var alwaysUseStop: Boolean = false
     private var intentLookup: Boolean = false
+    private var resultSent: Boolean = false
     private var speechRecognizer: SpeechRecognizer? = null
     private var recognizerIntent: Intent? = null
     private var previousRecognizerLang: String? = null
@@ -277,6 +279,7 @@ public class SpeechToTextPlugin :
             result.success(false)
             return
         }
+        resultSent = false
         createRecognizer()
         minRms = 1000.0F
         maxRms = -100.0F
@@ -313,7 +316,6 @@ public class SpeechToTextPlugin :
         }
         notifyListening(isRecording = false)
         result.success(true)
-        channel?.invokeMethod(SpeechToTextCallbackMethods.notifyStatus.name, SpeechToTextStatus.done.name)
         debugLog("Stop listening done")
     }
 
@@ -333,7 +335,6 @@ public class SpeechToTextPlugin :
         }
         notifyListening(isRecording = false)
         result.success(true)
-        channel?.invokeMethod(SpeechToTextCallbackMethods.notifyStatus.name, SpeechToTextStatus.done.name)
         debugLog("Cancel listening done")
     }
 
@@ -351,15 +352,24 @@ public class SpeechToTextPlugin :
                 null, Activity.RESULT_OK, null, null)
     }
 
-    private fun notifyListening(isRecording: Boolean) {
-        debugLog("Notify listening")
+    private fun notifyListening(isRecording: Boolean ) {
+        if ( listening == isRecording ) return;
         listening = isRecording
         val status = when (isRecording) {
             true -> SpeechToTextStatus.listening.name
             false -> SpeechToTextStatus.notListening.name
         }
+        debugLog("Notify status:" + status)
         channel?.invokeMethod(SpeechToTextCallbackMethods.notifyStatus.name, status)
-        debugLog("Notify listening done")
+        if ( !isRecording ) {
+            val doneStatus = when( resultSent) {
+                false -> SpeechToTextStatus.doneNoResult.name
+                else -> SpeechToTextStatus.done.name
+            }
+            debugLog("Notify status:" + doneStatus )
+            channel?.invokeMethod(SpeechToTextCallbackMethods.notifyStatus.name,
+                doneStatus )
+        }
     }
 
     private fun updateResults(speechBundle: Bundle?, isFinal: Boolean) {
@@ -386,8 +396,11 @@ public class SpeechToTextPlugin :
             speechResult.put("alternates", alternates)
             val jsonResult = speechResult.toString()
             debugLog("Calling results callback")
+            resultSent = true
             channel?.invokeMethod(SpeechToTextCallbackMethods.textRecognition.name,
                     jsonResult)
+        } else {
+            debugLog("Results null or empty")
         }
     }
 
@@ -571,6 +584,9 @@ public class SpeechToTextPlugin :
             else -> "error_unknown"
         }
         sendError(errorMsg)
+        if ( isListening()) {
+            notifyListening(false)
+        }
     }
 
     private fun debugLog( msg: String ) {
