@@ -5,6 +5,9 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin
 import android.Manifest
 import android.annotation.TargetApi
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothHeadset
+import android.bluetooth.BluetoothProfile
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -44,6 +47,7 @@ enum class SpeechToTextErrors {
     noLanguageIntent,
     recognizerNotAvailable,
     missingOrInvalidArg,
+    missingContext,
     unknown
 }
 
@@ -95,9 +99,14 @@ public class SpeechToTextPlugin :
     private var debugLogging: Boolean = false
     private var alwaysUseStop: Boolean = false
     private var intentLookup: Boolean = false
+    private var noBluetooth: Boolean = false
     private var resultSent: Boolean = false
     private var speechRecognizer: SpeechRecognizer? = null
     private var recognizerIntent: Intent? = null
+    private var bluetoothAdapter: android.bluetooth.BluetoothAdapter? = null
+    private var pairedDevices: Set<android.bluetooth.BluetoothDevice>? = null
+    private var activeBluetooth: android.bluetooth.BluetoothDevice? = null
+    private var bluetoothHeadset: BluetoothHeadset? = null
     private var previousRecognizerLang: String? = null
     private var previousPartialResults: Boolean = true
     private var previousListenMode: ListenMode = ListenMode.deviceDefault
@@ -179,6 +188,10 @@ public class SpeechToTextPlugin :
                     var iOpt = call.argument<Boolean>("intentLookup")
                     if (null != iOpt) {
                         intentLookup = iOpt == true
+                    }
+                    var noBtOpt = call.argument<Boolean>("noBluetooth")
+                    if (null != noBtOpt) {
+                        noBluetooth = noBtOpt == true
                     }
                     initialize(result)
                 }
@@ -288,6 +301,7 @@ public class SpeechToTextPlugin :
         if ( listenModeIndex == ListenMode.dictation.ordinal) {
             listenMode = ListenMode.dictation
         }
+        optionallyStartBluetooth()
         setupRecognizerIntent(languageTag, partialResults, listenMode, onDevice )
         handler.post {
             run {
@@ -298,6 +312,23 @@ public class SpeechToTextPlugin :
         notifyListening(isRecording = true)
         result.success(true)
         debugLog("Start listening done")
+    }
+
+    private fun optionallyStartBluetooth() {
+        if ( noBluetooth ) return 
+        val lbt = bluetoothAdapter
+        val lpaired = pairedDevices
+        val lhead = bluetoothHeadset
+        if (null != lbt && null!= lhead && null != lpaired && lbt.isEnabled()) {
+            for (tryDevice in lpaired) {
+                //This loop tries to start VoiceRecognition mode on every paired device until it finds one that works(which will be the currently in use bluetooth headset)
+                if (lhead.startVoiceRecognition(tryDevice)) {
+                    debugLog("Starting bluetooth voice recognition")
+                    activeBluetooth = tryDevice;
+                    break
+                }
+            }
+        }
     }
 
     private fun stopListening(result: Result) {
@@ -368,11 +399,23 @@ public class SpeechToTextPlugin :
                 else -> SpeechToTextStatus.done.name
             }
             debugLog("Notify status:" + doneStatus )
+            optionallyStopBluetooth();
             channel?.invokeMethod(SpeechToTextCallbackMethods.notifyStatus.name,
                 doneStatus )
         }
     }
 
+    private fun optionallyStopBluetooth() {
+        if ( noBluetooth ) return
+        val lactive = activeBluetooth
+        val lbt = bluetoothHeadset
+        if (null != lactive && null != lbt ) {
+            debugLog("Stopping bluetooth voice recognition")
+            lbt.stopVoiceRecognition(lactive)
+            activeBluetooth = null
+        }
+    }
+    
     private fun updateResults(speechBundle: Bundle?, isFinal: Boolean) {
         if (isDuplicateFinal( isFinal )) {
             debugLog("Discarding duplicate final")
@@ -427,8 +470,13 @@ public class SpeechToTextPlugin :
             val localActivity = currentActivity
             if (null != localActivity) {
                 debugLog("Requesting permission")
+                var requiredPermissions = arrayOf(Manifest.permission.RECORD_AUDIO)
+                if ( !noBluetooth ) {
+                    requiredPermissions = requiredPermissions.plus(Manifest.permission.BLUETOOTH_CONNECT)
+                }
+
                 ActivityCompat.requestPermissions(localActivity,
-                        arrayOf(Manifest.permission.RECORD_AUDIO), speechToTextPermissionCode)
+                        requiredPermissions, speechToTextPermissionCode)
             } else {
                 debugLog("no permission, no activity, completing")
                 completeInitialize()
@@ -445,15 +493,26 @@ public class SpeechToTextPlugin :
         debugLog("completeInitialize")
         if (permissionToRecordAudio) {
             debugLog("Testing recognition availability")
-            if (!SpeechRecognizer.isRecognitionAvailable(pluginContext)) {
-                Log.e(logTag, "Speech recognition not available on this device")
-                activeResult?.error(SpeechToTextErrors.recognizerNotAvailable.name,
-                        "Speech recognition not available on this device", "")
+            val localContext = pluginContext
+            if (localContext != null) {
+                if (!SpeechRecognizer.isRecognitionAvailable(localContext)) {
+                    Log.e(logTag, "Speech recognition not available on this device")
+                    activeResult?.error(SpeechToTextErrors.recognizerNotAvailable.name,
+                            "Speech recognition not available on this device", "")
+                    activeResult = null
+                    return
+                }
+                setupBluetooth()
+                createRecognizer()
+            } else {
+                debugLog("null context during initialization")
+                activeResult?.success(false)
+                activeResult?.error(
+                        SpeechToTextErrors.missingContext.name,
+                        "context unexpectedly null, initialization failed", "")
                 activeResult = null
                 return
             }
-
-            createRecognizer()
         }
 
         initializedSuccessfully = permissionToRecordAudio
@@ -461,6 +520,29 @@ public class SpeechToTextPlugin :
         activeResult?.success(permissionToRecordAudio)
         debugLog("leaving complete")
         activeResult = null
+    }
+
+    private fun setupBluetooth() {
+        if ( noBluetooth ) return
+        bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+        pairedDevices = bluetoothAdapter?.getBondedDevices()
+
+        val mProfileListener: BluetoothProfile.ServiceListener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                if (profile == BluetoothProfile.HEADSET) {
+                    bluetoothHeadset = proxy as BluetoothHeadset
+                    debugLog("Found a headset: " + bluetoothHeadset.toString())
+                }
+            }
+
+            override fun onServiceDisconnected(profile: Int) {
+                if (profile == BluetoothProfile.HEADSET) {
+                    debugLog("Clearing headset: ")
+                    bluetoothHeadset = null
+                }
+            }
+        }
+        bluetoothAdapter?.getProfileProxy(pluginContext, mProfileListener, BluetoothProfile.HEADSET)
     }
 
     private fun Context.findComponentName(): ComponentName? {
@@ -472,27 +554,33 @@ public class SpeechToTextPlugin :
         if ( null != speechRecognizer ) {
             return
         }
-        debugLog("Creating recognizer")
-        if ( intentLookup ) {
-            speechRecognizer = createSpeechRecognizer(pluginContext,pluginContext?.findComponentName()).apply {
-                debugLog("Setting listener")
-                setRecognitionListener(this@SpeechToTextPlugin)
+        handler.post {
+            run {
+                debugLog("Creating recognizer")
+                if (intentLookup) {
+                    speechRecognizer = createSpeechRecognizer(
+                        pluginContext,
+                        pluginContext?.findComponentName()
+                    ).apply {
+                        debugLog("Setting listener")
+                        setRecognitionListener(this@SpeechToTextPlugin)
+                    }
+                } else {
+                    speechRecognizer = createSpeechRecognizer(pluginContext).apply {
+                        debugLog("Setting listener")
+                        setRecognitionListener(this@SpeechToTextPlugin)
+                    }
+                }
+                if (null == speechRecognizer) {
+                    Log.e(logTag, "Speech recognizer null")
+                    activeResult?.error(
+                        SpeechToTextErrors.recognizerNotAvailable.name,
+                        "Speech recognizer null", ""
+                    )
+                    activeResult = null
+                }
             }
         }
-        else {
-            speechRecognizer = createSpeechRecognizer(pluginContext).apply {
-                debugLog("Setting listener")
-                setRecognitionListener(this@SpeechToTextPlugin)
-            }
-        }
-        if (null == speechRecognizer) {
-            Log.e(logTag, "Speech recognizer null")
-            activeResult?.error(
-                    SpeechToTextErrors.recognizerNotAvailable.name,
-                    "Speech recognizer null", "")
-            activeResult = null
-        }
-
         debugLog("before setup intent")
         setupRecognizerIntent(defaultLanguageTag, true, ListenMode.deviceDefault, false )
         debugLog("after setup intent")
@@ -582,8 +670,13 @@ public class SpeechToTextPlugin :
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "error_busy"
             SpeechRecognizer.ERROR_SERVER -> "error_server"
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "error_speech_timeout"
-            else -> "error_unknown"
+            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "error_language_not_supported"
+            SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "error_language_unavailable"
+            SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "error_server_disconnected"
+            SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "error_too_many_requests"
+            else -> "error_unknown ($errorCode)"
         }
+
         sendError(errorMsg)
         if ( isListening()) {
             notifyListening(false)
