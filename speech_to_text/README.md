@@ -1,6 +1,6 @@
 # speech_to_text
 
-[![pub package](https://img.shields.io/badge/pub-v5.0.0-blue)](https://pub.dartlang.org/packages/speech_to_text) [![build status](https://github.com/csdcorp/speech_to_text/workflows/build/badge.svg)](https://github.com/csdcorp/speech_to_text/actions?query=workflow%3Abuild) [![codecov](https://codecov.io/gh/csdcorp/speech_to_text/branch/main/graph/badge.svg?token=4LV3HESMS4)](undefined)
+[![pub package](https://img.shields.io/badge/pub-v5.4.2-blue)](https://pub.dartlang.org/packages/speech_to_text) [![build status](https://github.com/csdcorp/speech_to_text/workflows/build/badge.svg)](https://github.com/csdcorp/speech_to_text/actions?query=workflow%3Abuild) [![codecov](https://codecov.io/gh/csdcorp/speech_to_text/branch/main/graph/badge.svg?token=4LV3HESMS4)](undefined)
 
 A library that exposes device specific speech recognition capability.
 
@@ -11,13 +11,18 @@ conversion or always on listening.
 
 ## Recent Updates
 
+5.4.2 Supports bluetooth headsets on Android, this requires new permissions, see the permissions section below. 
+Note that bluetooth  permission is requested from the user, when upgrading users may have to manually set the permission 
+or clear their cache to force a re-request.  
+
+5.3.0 Fixes a longstanding issue with web support and improves error handling on iOS. From 5.2.0+
+`compileSdkVersion 31` must be used for Android. 
+
 5.0.0 improves audio handling on iOS thanks to work by @deJong-IT. It also adds a new `done` status sent after
 the listening session is complete and the plugin has finished with the audio subsystem on the device. This 
 should help coordinate multiple audio plugins.
 
 The 4.2.0 version is significantly faster starting to listen on iOS (~500 ms) and makes null safety the default release. 
-
-The 4.0.0 version adds null safety support thanks to the fabulous work of @kaladron. Support for web is also included though it is not yet well tested. 
 
 *Note*: Feedback from any test devices is welcome. 
 
@@ -25,6 +30,7 @@ The 4.0.0 version adds null safety support thanks to the fabulous work of @kalad
 
 To recognize text from the microphone import the package and call the plugin, like so: 
 
+### Minimal 
 ```dart
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
@@ -38,6 +44,122 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
     }
     // some time later...
     speech.stop()
+```
+
+### Complete Flutter example
+```dart
+import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Flutter Demo',
+      home: MyHomePage(),
+    );
+  }
+}
+
+class MyHomePage extends StatefulWidget {
+  MyHomePage({Key? key}) : super(key: key);
+
+  @override
+  _MyHomePageState createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  SpeechToText _speechToText = SpeechToText();
+  bool _speechEnabled = false;
+  String _lastWords = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeech();
+  }
+
+  /// This has to happen only once per app
+  void _initSpeech() async {
+    _speechEnabled = await _speechToText.initialize();
+    setState(() {});
+  }
+
+  /// Each time to start a speech recognition session
+  void _startListening() async {
+    await _speechToText.listen(onResult: _onSpeechResult);
+    setState(() {});
+  }
+
+  /// Manually stop the active speech recognition session
+  /// Note that there are also timeouts that each platform enforces
+  /// and the SpeechToText plugin supports setting timeouts on the
+  /// listen method.
+  void _stopListening() async {
+    await _speechToText.stop();
+    setState(() {});
+  }
+
+  /// This is the callback that the SpeechToText plugin calls when
+  /// the platform returns recognized words.
+  void _onSpeechResult(SpeechRecognitionResult result) {
+    setState(() {
+      _lastWords = result.recognizedWords;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Speech Demo'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Container(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Recognized words:',
+                style: TextStyle(fontSize: 20.0),
+              ),
+            ),
+            Expanded(
+              child: Container(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  // If listening is active show the recognized words
+                  _speechToText.isListening
+                      ? '$_lastWords'
+                      // If listening isn't active but could be tell the user
+                      // how to start it, otherwise indicate that speech
+                      // recognition is not yet ready or not supported on
+                      // the target device
+                      : _speechEnabled
+                          ? 'Tap the microphone to start listening...'
+                          : 'Speech not available',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed:
+            // If not yet listening for speech start, otherwise stop
+            _speechToText.isNotListening ? _startListening : _stopListening,
+        tooltip: 'Listen',
+        child: Icon(_speechToText.isNotListening ? Icons.mic_off : Icons.mic),
+      ),
+    );
+  }
+}
 ```
 
 ### Initialize once
@@ -64,6 +186,17 @@ Add the record audio permission to your _AndroidManifest.xml_ file, located in `
 
 * `android.permission.RECORD_AUDIO` - this permission is required for microphone access.
 * `android.permission.INTERNET` - this permission is required because speech recognition may use remote services.
+* `android.permission.BLUETOOTH` - this permission is required because speech recognition can use bluetooth headsets when connected.
+* `android.permission.BLUETOOTH_ADMIN` - this permission is required because speech recognition can use bluetooth headsets when connected.
+* `android.permission.BLUETOOTH_ADMIN` - this permission is required because speech recognition can use bluetooth headsets when connected.
+
+```xml
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+```
 
 #### Android SDK 30 or later
 
@@ -123,6 +256,10 @@ as `LocaleName` instances. Then the `listen` method takes an optional `localeId`
 Android speech recognition has a very short timeout when the speaker pauses. The duration seems to vary by device 
 and version of the Android OS. In the devices I've used none have had a pause longer than 5 seconds. Unfortunately
 there appears to be no way to change that behaviour. 
+
+### Android beeps on start/stop of speech recognition
+
+This is a feature of the Android OS and there is no supported way to disable it. 
 
 ### Continuous speech recognition
 
@@ -224,6 +361,16 @@ Ensure the app has the required permissions. The symptom for this that you get a
  https://stackoverflow.com/questions/46376193/android-speechrecognizer-audio-recording-error
  Here's the important excerpt: 
  >You should go to system setting, Apps, Google app, then enable its permission of microphone. 
+
+#### User reported steps
+From issue [#298](https://github.com/csdcorp/speech_to_text/issues/298) this is the detailed set of steps that
+resolved their issue:
+
+1. install google app
+2. Settings > Voice > Languages - select the language
+3. Settings > Voice > Languages > Offline speech recognition - install language
+4. Settings > Language and region - select the Search language and Search region
+5. Delete the build folder from the root path of the project and run again
 
 ### iOS recognition guidelines
 Apple has quite a good guide on the user experience for using speech, the original is here 

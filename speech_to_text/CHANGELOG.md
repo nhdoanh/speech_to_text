@@ -1,5 +1,81 @@
 # Changelog
 
+## 5.5.0
+### New
+  * `initialize` method on the `SpeechToTextProvider` adds the `finalTimeout` and 
+  `options` parameters that match the same parameters on `SpeechToText`
+  * onDevice support added for Android
+  * example app now supports `pauseFor` and `waitFor` parameters
+
+### Fix
+   * example app updated for new Android build requirements
+   * Result method signature fixed in Android override
+
+## 5.4.3
+
+### New
+  * new Android option `androidNoBluetooth` can be used in `initialize` to disable Bluetooth support 
+  on Android devices which removes the need for Bluetooth permission. 
+
+## 5.4.2
+
+### New
+  * Now asks for Bluetooth permission on SDK 31 and above. When upgrading an already installed app
+  the permission will not be requested. Users will have to manually set the permission or clear 
+  their app cache to force a re-request. See this [issue](https://github.com/csdcorp/speech_to_text/issues/282)
+
+## 5.4.1
+
+### New
+  * Android permission documentation
+
+## 5.4.0
+
+### New
+  * Support for bluetooth headsets in Android
+
+## 5.3.0
+
+### New
+  * Documentation improvements for `listen` parameters
+  * iOS error handling improvements
+  
+### Fix
+  * lastRecognizedWords now cleared before each `listen` call 
+  * web issue resolve #242
+
+## 5.2.0
+
+### New
+  * Requires `compileSdkVersion 31` to build, check your `build.gradle`
+  * Changed the `error_unknown` return to `error_unknown ({error_code})` so that the 
+  native Android error code is visible. This is a potentially breaking change if you 
+  behaviour for the `error_unkown` value. 
+  * Added new SDK 31 error messages for Android 
+    * `error_language_not_supported`
+    * `error_language_unavailable`
+    * `error_server_disconnected`
+    * `error_too_many_requests`
+
+### Fix
+  * Fix for Android to handle list end on unrecognized content properly #253
+
+## 5.1.1
+
+### Fix
+  * Fix for Android compile issue on latest SDK #259
+
+## 5.1.0
+
+### New
+  * The example app now supports Web as a run target
+  * Improved the example app and its documentation
+  * Improved the provider example app
+  * Android now handles the `done` condition better, especially in case of error
+  * Updated the minimal example in the README file
+
+### Fix
+  * Fix for listing available Locales on some Android devices
 ## 5.0.0
 ### New
   * Bluetooth headsets now supported on iOS

@@ -43,6 +43,20 @@ typedef SpeechResultListener = void Function(SpeechRecognitionResult result);
 ///   "error_busy"
 ///   "error_server"
 ///   "error_speech_timeout"
+///   "error_language_not_supported"
+///   "error_language_unavailable"
+///   "error_server_disconnected"
+///   "error_too_many_requests"
+///
+/// iOS errors are not well documented in the iOS SDK, so far these are the
+/// errors that have been observed:
+///   "error_speech_recognizer_disabled"
+///   "error_retry"
+///   "error_no_match"
+///
+/// Both platforms use this message for an unrecognized error:
+///   "error_unknown ($errorCode)" where $errorCode provides more detail
+
 /// See the [onError] argument on the [initialize] method for use.
 typedef SpeechErrorListener = void Function(
     SpeechRecognitionError errorNotification);
@@ -93,27 +107,63 @@ class SpeechToText {
   /// This allows the done status to be sent from the plugin to clients
   /// even without a final speech result.
   static const String _doneNoResultStatus = 'doneNoResult';
-  static const _defaultFinalTimeout = Duration(milliseconds: 2000);
+  static const defaultFinalTimeout = Duration(milliseconds: 2000);
   static const _minFinalTimeout = Duration(milliseconds: 50);
 
+  /// on Android SDK 29 the recognizer stop method did not work properly so the
+  /// plugin destroys the recognizer instead. If this causes problems
+  /// this option overrides that behaviour and forces the plugin to use
+  /// the stop command instead, even on SDK 29.
   static final SpeechConfigOption androidAlwaysUseStop =
       SpeechConfigOption('android', 'alwaysUseStop', true);
+
+  /// Some Android builds do not properly define the default speech
+  /// recognition intent. This option forces a workaround to lookup the
+  /// intent by querying the intent manager.
   static final SpeechConfigOption androidIntentLookup =
       SpeechConfigOption('android', 'intentLookup', true);
 
+  /// If your application does not need Bluetooth support on Android and
+  /// you'd rather not have to ask for Bluetooth permission pass this option
+  /// to disable Bluetooth support on Android.
+  static final SpeechConfigOption androidNoBluetooth =
+      SpeechConfigOption('android', 'noBluetooth', true);
+
+  /// This option does nothing yet, may disable Bluetooth on iOS if there is
+  /// a need.
+  static final SpeechConfigOption iosNoBluetooth =
+      SpeechConfigOption('ios', 'noBluetooth', true);
+
   static final SpeechToText _instance = SpeechToText.withMethodChannel();
   bool _initWorked = false;
+
+  /// True when any words have been recognized during the current listen session.
   bool _recognized = false;
+
+  /// True as soon as the platform reports it has started listening which
+  /// happens some time after the listen method is called.
   bool _listening = false;
   bool _cancelOnError = false;
+
+  /// True if the user has requested to cancel recognition when a permanent
+  /// error occurs.
   bool _partialResults = false;
+
+  /// True when the results callback has already been called with a
+  /// final result.
   bool _notifiedFinal = false;
+
+  /// True when the internal status callback has been called with the
+  /// done status. Note that this does not mean the user callback has
+  /// been called since that is only called after the final result has been
+  /// seen.
   bool _notifiedDone = false;
+
   int _listenStartedAt = 0;
   int _lastSpeechEventAt = 0;
   Duration? _pauseFor;
   Duration? _listenFor;
-  Duration _finalTimeout = _defaultFinalTimeout;
+  Duration _finalTimeout = defaultFinalTimeout;
 
   /// True if not listening or the user called cancel / stop, false
   /// if cancel/stop were invoked by timeout or error condition.
@@ -222,7 +272,7 @@ class SpeechToText {
       {SpeechErrorListener? onError,
       SpeechStatusListener? onStatus,
       debugLogging = false,
-      Duration finalTimeout = _defaultFinalTimeout,
+      Duration finalTimeout = defaultFinalTimeout,
       List<SpeechConfigOption>? options}) async {
     if (_initWorked) {
       return Future.value(_initWorked);
@@ -238,6 +288,14 @@ class SpeechToText {
     _initWorked = await SpeechToTextPlatform.instance
         .initialize(debugLogging: debugLogging, options: options);
     return _initWorked;
+  }
+
+  Future<bool> isSpeechAvailable() async {
+    if (!_initWorked) {
+      return Future.value(false);
+    }
+    _shutdownListener();
+    return await SpeechToTextPlatform.instance.isSpeechAvailable();
   }
 
   /// Stops the current listen for speech if active, does nothing if not.
@@ -333,6 +391,12 @@ class SpeechToText {
   /// leaving the device. If it cannot do this the listen attempt will fail. This is
   /// usually only needed for sensitive content where privacy or security is a concern.
   ///
+  /// [listenMode] tunes the speech recognition engine to expect certain
+  /// types of spoken content. It defaults to [ListenMode.confirmation] which
+  /// is the most common use case, words or short phrases to confirm a command.
+  /// [ListenMode.dictation] is for longer spoken content, sentences or
+  /// paragraphs, while [ListenMode.search] expects a sequence of search terms.
+  ///
   /// [sampleRate] optional for compatibility with certain iOS devices, some devices
   /// crash with `sampleRate != device's supported sampleRate`, try 44100 if seeing
   /// crashes
@@ -351,6 +415,7 @@ class SpeechToText {
     if (!_initWorked) {
       throw SpeechToTextNotInitializedException();
     }
+    _lastRecognized = '';
     _userEnded = false;
     _lastSpeechResult = null;
     _cancelOnError = cancelOnError;
@@ -375,7 +440,7 @@ class SpeechToText {
         _setupListenAndPause(pauseFor, listenFor);
       }
     } on PlatformException catch (e) {
-      throw ListenFailedException(e.details);
+      throw ListenFailedException(e.message, e.details, e.stacktrace);
     }
   }
 
@@ -590,6 +655,8 @@ class SpeechToTextNotInitializedException implements Exception {}
 /// Thrown when listen fails to properly start a speech listening session
 /// on the device
 class ListenFailedException implements Exception {
-  final String details;
-  ListenFailedException(this.details);
+  final String? message;
+  final String? details;
+  final String? stackTrace;
+  ListenFailedException(this.message, [this.details, this.stackTrace]);
 }

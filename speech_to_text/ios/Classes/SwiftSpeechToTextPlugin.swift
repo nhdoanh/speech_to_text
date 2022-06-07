@@ -93,10 +93,8 @@ public class SwiftSpeechToTextPlugin: NSObject, FlutterPlugin {
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "plugin.csdcorp.com/speech_to_text", binaryMessenger: registrar.messenger())
-        if #available(iOS 10.0, *) {
             let instance = SwiftSpeechToTextPlugin( channel, registrar: registrar )
             registrar.addMethodCallDelegate(instance, channel: channel )
-        }
     }
     
     init( _ channel: FlutterMethodChannel, registrar: FlutterPluginRegistrar ) {
@@ -577,8 +575,28 @@ extension SwiftSpeechToTextPlugin : SFSpeechRecognitionTaskDelegate {
     public func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didFinishSuccessfully successfully: Bool) {
         reportError(source: "FinishSuccessfully", error: task.error)
         os_log("FinishSuccessfully", log: pluginLog, type: .debug )
-        if ( !successfully) {
+        if ( !successfully ) {
             invokeFlutter( SwiftSpeechToTextCallbackMethods.notifyStatus, arguments: SpeechToTextStatus.doneNoResult.rawValue )
+            if let err = task.error as NSError? {
+                var errorMsg: String
+                switch err.code {
+                case 201:
+                    errorMsg = "error_speech_recognizer_disabled"
+                case 203:
+                    errorMsg = "error_retry"
+                case 1110:
+                    errorMsg = "error_no_match"
+                default:                    
+                    errorMsg = "error_unknown (\(err.code))"
+                }
+                let speechError = SpeechRecognitionError(errorMsg: errorMsg, permanent: true )
+                do {
+                    let errorResult = try jsonEncoder.encode(speechError)
+                    invokeFlutter( SwiftSpeechToTextCallbackMethods.notifyError, arguments: String(data:errorResult, encoding: .utf8) )
+                } catch {
+                    os_log("Could not encode JSON", log: pluginLog, type: .error)
+                }
+            }
         }
         stopCurrentListen( )
     }
